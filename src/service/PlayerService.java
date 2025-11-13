@@ -2,19 +2,35 @@ package service;
 
 import java.io.FileInputStream;
 import java.util.List;
-import javazoom.jl.player.Player;
+import javazoom.jl.player.advanced.AdvancedPlayer;
+import javazoom.jl.player.advanced.PlaybackListener;
+import javazoom.jl.player.advanced.PlaybackEvent;
 
 public class PlayerService {
     private static Thread currentThread = null;
-    private static Player currentPlayer = null;
+    private static AdvancedPlayer currentPlayer = null;
+    private static boolean paused = false;
+    private static int pausedFrame = 0;
+    private static String currentSong = null;
+    private static List<String> currentPlaylist = null;
+    private static int currentIndex = -1;
 
     public static void playSong(String song) {
-        stopCurrentSong(); // stop previous song
-
+        stopCurrentSong(); // Stop any current playback
+        currentSong = song;
+        paused = false;
         currentThread = new Thread(() -> {
             try (FileInputStream fis = new FileInputStream("data/songs/" + song)) {
-                currentPlayer = new Player(fis);
-                currentPlayer.play(); // blocks until song finishes
+                currentPlayer = new AdvancedPlayer(fis);
+                currentPlayer.setPlayBackListener(new PlaybackListener() {
+                    @Override
+                    public void playbackFinished(PlaybackEvent evt) {
+                        if (!paused && currentPlaylist != null && currentIndex < currentPlaylist.size() - 1) {
+                            playNext();
+                        }
+                    }
+                });
+                currentPlayer.play();
             } catch (Exception e) {
                 System.out.println("Error playing song: " + song + " -> " + e.getMessage());
             } finally {
@@ -27,7 +43,7 @@ public class PlayerService {
     public static void stopCurrentSong() {
         try {
             if (currentPlayer != null) {
-                currentPlayer.close(); // this actually stops playback
+                currentPlayer.close();
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -35,29 +51,41 @@ public class PlayerService {
         if (currentThread != null && currentThread.isAlive()) {
             currentThread.interrupt();
         }
+        paused = false;
+        pausedFrame = 0;
     }
 
-    // Optional: sequential playlist playback
+    public static void pauseSong() {
+        if (currentPlayer != null) {
+            paused = true;
+            stopCurrentSong();
+            System.out.println("Paused at frame " + pausedFrame);
+        }
+    }
+
+    public static void resumeSong() {
+        if (paused && currentSong != null) {
+            paused = false;
+            playSong(currentSong);
+        }
+    }
+
     public static void playPlaylist(List<String> songs) {
         if (songs == null || songs.isEmpty()) return;
-
-        Thread playlistThread = new Thread(() -> {
-            for (String song : songs) {
-                if (Thread.currentThread().isInterrupted()) break;
-                playSongAndWait(song);
-            }
-        });
-        playlistThread.start();
+        currentPlaylist = songs;
+        currentIndex = 0;
+        playSong(songs.get(0));
     }
 
-    private static void playSongAndWait(String song) {
-        try (FileInputStream fis = new FileInputStream("data/songs/" + song)) {
-            currentPlayer = new Player(fis);
-            currentPlayer.play();
-        } catch (Exception e) {
-            System.out.println("Error playing song: " + song + " -> " + e.getMessage());
-        } finally {
-            currentPlayer = null;
-        }
+    public static void playNext() {
+        if (currentPlaylist == null || currentIndex >= currentPlaylist.size() - 1) return;
+        currentIndex++;
+        playSong(currentPlaylist.get(currentIndex));
+    }
+
+    public static void playPrevious() {
+        if (currentPlaylist == null || currentIndex <= 0) return;
+        currentIndex--;
+        playSong(currentPlaylist.get(currentIndex));
     }
 }
